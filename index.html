@@ -2563,22 +2563,19 @@ function applyTextColor(){
 // 🔠 폰트 크기 (font-size) 적용 - 모드 인지: FIGMA면 cqw로!
 // ============================================================
 function applyFontSize(){
-  const size = parseFloat(document.getElementById('text-fontsize').value);
-  if(!size || size <= 0){ showToast('올바른 크기 입력'); return; }
+  const val = parseFloat(document.getElementById('text-fontsize').value);
+  if(!val || val <= 0){ showToast('올바른 크기 입력'); return; }
   
-  // FIGMA 모드에서 cqw 옵션이 켜져 있으면 → cqw로 저장 (반응형)
-  const cqwOn = document.getElementById('figma-cqw-fonts');
-  const useCqw = (currentMode === 'figma') && cqwOn && cqwOn.checked;
+  const isFigma = (typeof currentMode !== 'undefined' && currentMode === 'figma');
   
-  if(useCqw){
-    // 기준 폭 대비 cqw로 변환
-    const baseWidth = parseInt(document.getElementById('figma-base-width').value, 10) || 900;
-    const cqw = Math.round((size / baseWidth * 100) * 100) / 100; // 소수점 2자리
-    applyStyleToSelected({ 'font-size': cqw + 'cqw' });
-    showToast('크기 적용: ' + cqw + 'cqw (원본 기준 ' + size + 'px)');
+  if(isFigma){
+    // FIGMA 모드: 입력값을 그대로 cqw로 저장
+    applyStyleToSelected({ 'font-size': val + 'cqw' });
+    showToast('크기 적용: ' + val + 'cqw');
   } else {
-    applyStyleToSelected({ 'font-size': size + 'px' });
-    showToast('크기 적용: ' + size + 'px');
+    // GRAPES 모드: px 그대로
+    applyStyleToSelected({ 'font-size': val + 'px' });
+    showToast('크기 적용: ' + val + 'px');
   }
   closeSubPane();
 }
