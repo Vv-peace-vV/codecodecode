@@ -3294,118 +3294,12 @@ function convertBorderShorthand(val, baseWidth, decimals){
 }
 
 /**
- * 스타일 객체에서 Figma 변환 규칙 적용
- * @param {object} styleObj parseInlineStyle 결과
- * @param {object} opts {baseWidth, cqwFonts, decimals, cleanDefaults}
+ * "24px" → 24 (숫자만 추출), 아니면 null
+ * (기존 parsePxValue와 동일 - 이미 위에 있으니 재사용)
  */
-function convertFigmaStyles(styleObj, opts){
-  const bw = opts.baseWidth;
-  const dec = opts.decimals;
-  
-  // 1. 좌표 → %  (left, top, right, bottom)
-  ['left','top','right','bottom'].forEach(k => {
-    const px = parsePxValue(styleObj[k]);
-    if(px !== null){
-      styleObj[k] = pxToPercent(px, bw, dec);
-    }
-  });
-  
-  // 2. 크기 → %  (width, height)
-  ['width','height'].forEach(k => {
-    const px = parsePxValue(styleObj[k]);
-    if(px !== null){
-      styleObj[k] = pxToPercent(px, bw, dec);
-    }
-  });
-  
-  // 3. padding 4방향 → %
-  ['padding','padding-top','padding-right','padding-bottom','padding-left',
-   'margin','margin-top','margin-right','margin-bottom','margin-left'].forEach(k => {
-    const px = parsePxValue(styleObj[k]);
-    if(px !== null){
-      styleObj[k] = pxToPercent(px, bw, dec);
-    }
-  });
-  
-  // 4. border-radius 4방향 → %
-  ['border-radius','border-top-left-radius','border-top-right-radius',
-   'border-bottom-left-radius','border-bottom-right-radius'].forEach(k => {
-    const px = parsePxValue(styleObj[k]);
-    if(px !== null){
-      styleObj[k] = pxToPercent(px, bw, dec);
-    }
-  });
-  
-  // 5. cqw 변환 (폰트/테두리) - 옵션에 따라
-  if(opts.cqwFonts){
-    // font-size, letter-spacing, line-height (px일 때만)
-    ['font-size','letter-spacing'].forEach(k => {
-      const px = parsePxValue(styleObj[k]);
-      if(px !== null){
-        styleObj[k] = pxToCqw(px, bw, dec);
-      }
-    });
-    
-    // border 단축형 (1.50px black solid → 0.17cqw black solid)
-    ['border','border-top','border-right','border-bottom','border-left','outline'].forEach(k => {
-      if(styleObj[k] && /\d+(?:\.\d+)?px/.test(styleObj[k])){
-        styleObj[k] = convertBorderShorthand(styleObj[k], bw, dec);
-      }
-    });
-    
-    // border-width 개별
-    ['border-width','border-top-width','border-right-width','border-bottom-width','border-left-width'].forEach(k => {
-      const px = parsePxValue(styleObj[k]);
-      if(px !== null){
-        styleObj[k] = pxToCqw(px, bw, dec);
-      }
-    });
-    
-    // -webkit-text-stroke
-    if(styleObj['-webkit-text-stroke'] && /\d+(?:\.\d+)?px/.test(styleObj['-webkit-text-stroke'])){
-      styleObj['-webkit-text-stroke'] = convertBorderShorthand(styleObj['-webkit-text-stroke'], bw, dec);
-    }
-  }
-  
-  // 6. line-height는 px면 unitless(1.5 등)로 (한글 가독성)
-  const lh = styleObj['line-height'];
-  if(lh){
-    const lhPx = parsePxValue(lh);
-    const fs = parsePxValue(styleObj['font-size']);
-    if(lhPx !== null && fs){
-      // 원본 폰트대비 배수로 변환
-      styleObj['line-height'] = roundTo(lhPx / fs, 2).toString();
-    } else if(lhPx !== null){
-      // font-size 없으면 그냥 1.4로
-      styleObj['line-height'] = '1.4';
-    }
-  }
-  
-  // 7. 기본값 정리 (옵션)
-  if(opts.cleanDefaults){
-    if(styleObj['word-wrap'] === 'break-word') delete styleObj['word-wrap'];
-    if(styleObj['overflow-wrap'] === 'break-word') delete styleObj['overflow-wrap'];
-    // font-weight:400 제거 (기본값)
-    if(styleObj['font-weight'] === '400' || styleObj['font-weight'] === 'normal') delete styleObj['font-weight'];
-    // Figma가 자주 넣는 무의미한 것들
-    if(styleObj['display'] === 'inline-flex' && !styleObj['flex-direction'] && !styleObj['justify-content'] && !styleObj['align-items'] && !styleObj['gap']){
-      // 순수 inline-flex만 있고 flex 자식 정렬이 없으면 삭제 후보 (하지만 안전하게 유지)
-    }
-  }
-  
-  return styleObj;
-}
 
 /**
- * 컨테이너 요소인지 판단 (자식이 있는 div)
- * Figma는 대부분 div로 나옴
- */
-function isFigmaContainer(el){
-  return el.tagName === 'DIV' && el.children.length > 0;
-}
-
-/**
- * 최상위 요소에서 원본 width/height 추출 (aspect-ratio 계산용)
+ * 요소에서 원본 width/height (px) 추출
  */
 function extractOriginalSize(el){
   const styleStr = el.getAttribute('style') || '';
@@ -3414,6 +3308,167 @@ function extractOriginalSize(el){
     width: parsePxValue(map['width']),
     height: parsePxValue(map['height'])
   };
+}
+
+/**
+ * 스타일 객체에 Figma 변환 규칙 적용
+ * @param {object} styleObj
+ * @param {object} opts {baseWidth, cqwFonts, decimals, cleanDefaults}
+ * @param {object} parentSize {width, height} 부모의 원본 px 크기 (없으면 baseWidth 사용)
+ * @param {boolean} isAbsolute 이 요소가 position:absolute인지
+ */
+function convertFigmaStyles(styleObj, opts, parentSize, isAbsolute){
+  const bw = opts.baseWidth;
+  const dec = opts.decimals;
+  
+  // 기준 크기 결정
+  // - width, left, right, padding, margin, border-radius → 부모의 원본 폭
+  // - height, top, bottom → 부모의 원본 세로 (absolute일 때) / 부모 폭 (그 외)
+  const parentW = (parentSize && parentSize.width) || bw;
+  const parentH = (parentSize && parentSize.height) || parentW;
+  
+  // 좌표 → %
+  // left/right는 부모 폭 기준
+  ['left','right'].forEach(k => {
+    const px = parsePxValue(styleObj[k]);
+    if(px !== null){
+      styleObj[k] = roundTo(px / parentW * 100, dec) + '%';
+    }
+  });
+  // top/bottom은 부모 세로 기준 (absolute일 때만 세로 기준이 의미 있음)
+  ['top','bottom'].forEach(k => {
+    const px = parsePxValue(styleObj[k]);
+    if(px !== null){
+      styleObj[k] = roundTo(px / parentH * 100, dec) + '%';
+    }
+  });
+  
+  // width → 부모 폭 대비 %
+  {
+    const px = parsePxValue(styleObj['width']);
+    if(px !== null){
+      styleObj['width'] = roundTo(px / parentW * 100, dec) + '%';
+    }
+  }
+  // height → 부모 세로 대비 %
+  {
+    const px = parsePxValue(styleObj['height']);
+    if(px !== null){
+      styleObj['height'] = roundTo(px / parentH * 100, dec) + '%';
+    }
+  }
+  
+  // padding → 부모 폭 대비 % (CSS 표준: padding %는 부모 폭 기준)
+  ['padding','padding-top','padding-right','padding-bottom','padding-left',
+   'margin','margin-top','margin-right','margin-bottom','margin-left'].forEach(k => {
+    const px = parsePxValue(styleObj[k]);
+    if(px !== null){
+      styleObj[k] = roundTo(px / parentW * 100, dec) + '%';
+    }
+  });
+  
+  // border-radius → 부모 폭 대비 %
+  ['border-radius','border-top-left-radius','border-top-right-radius',
+   'border-bottom-left-radius','border-bottom-right-radius'].forEach(k => {
+    const px = parsePxValue(styleObj[k]);
+    if(px !== null){
+      styleObj[k] = roundTo(px / parentW * 100, dec) + '%';
+    }
+  });
+  
+  // cqw 변환 (폰트/테두리) - baseWidth 기준 (컨테이너 폭)
+  if(opts.cqwFonts){
+    ['font-size','letter-spacing'].forEach(k => {
+      const px = parsePxValue(styleObj[k]);
+      if(px !== null){
+        styleObj[k] = roundTo(px / bw * 100, dec) + 'cqw';
+      }
+    });
+    
+    ['border','border-top','border-right','border-bottom','border-left','outline'].forEach(k => {
+      if(styleObj[k] && /\d+(?:\.\d+)?px/.test(styleObj[k])){
+        styleObj[k] = convertBorderShorthand(styleObj[k], bw, dec);
+      }
+    });
+    
+    ['border-width','border-top-width','border-right-width','border-bottom-width','border-left-width'].forEach(k => {
+      const px = parsePxValue(styleObj[k]);
+      if(px !== null){
+        styleObj[k] = roundTo(px / bw * 100, dec) + 'cqw';
+      }
+    });
+    
+    if(styleObj['-webkit-text-stroke'] && /\d+(?:\.\d+)?px/.test(styleObj['-webkit-text-stroke'])){
+      styleObj['-webkit-text-stroke'] = convertBorderShorthand(styleObj['-webkit-text-stroke'], bw, dec);
+    }
+  }
+  
+  // line-height는 px면 unitless로
+  const lh = styleObj['line-height'];
+  if(lh){
+    const lhPx = parsePxValue(lh);
+    // font-size는 이미 cqw로 바뀌었을 수 있으니 원본이 있으면 못 쓰지만,
+    // 일반적으로 1.4 정도가 무난
+    if(lhPx !== null){
+      // 원본 폰트 대비 계산은 이미 font-size 변환 후라 어려움 → 안전한 값
+      styleObj['line-height'] = '1.4';
+    }
+  }
+  
+  // 기본값 정리
+  if(opts.cleanDefaults){
+    if(styleObj['word-wrap'] === 'break-word') delete styleObj['word-wrap'];
+    if(styleObj['overflow-wrap'] === 'break-word') delete styleObj['overflow-wrap'];
+    if(styleObj['font-weight'] === '400' || styleObj['font-weight'] === 'normal') delete styleObj['font-weight'];
+  }
+  
+  return styleObj;
+}
+
+/**
+ * DOM 트리를 재귀 순회하며 각 요소를 부모 크기 기준으로 변환
+ * @param {Element} el 현재 요소
+ * @param {object} parentSize 부모의 원본 px 크기 {width, height}
+ * @param {object} opts 변환 옵션
+ * @param {object} stats 통계 카운터
+ */
+function convertFigmaTree(el, parentSize, opts, stats){
+  // 현재 요소의 원본 크기를 먼저 뽑기 (자식들에게 넘겨줄 값)
+  const mySize = extractOriginalSize(el);
+  
+  // 스타일 처리
+  const styleStr = el.getAttribute('style') || '';
+  if(styleStr){
+    // id/class 제거
+    if(el.id) el.removeAttribute('id');
+    if(el.className) el.removeAttribute('class');
+    
+    let styleObj = parseInlineStyle(styleStr);
+    const isAbsolute = styleObj['position'] === 'absolute';
+    styleObj = convertFigmaStyles(styleObj, opts, parentSize, isAbsolute);
+    
+    const finalStr = stringifyInlineStyle(styleObj);
+    if(finalStr) el.setAttribute('style', finalStr);
+    else el.removeAttribute('style');
+    
+    stats.converted++;
+  } else {
+    if(el.id) el.removeAttribute('id');
+    if(el.className) el.removeAttribute('class');
+  }
+  
+  // 자식들에게 넘길 크기 결정
+  // - 내 원본 크기가 있으면 그걸 사용
+  // - 없으면 부모 크기를 그대로 넘김 (투명 wrapper 케이스)
+  const childParentSize = {
+    width: mySize.width || (parentSize && parentSize.width),
+    height: mySize.height || (parentSize && parentSize.height)
+  };
+  
+  // 자식들 재귀 처리
+  Array.from(el.children).forEach(child => {
+    convertFigmaTree(child, childParentSize, opts, stats);
+  });
 }
 
 /**
@@ -3426,7 +3481,6 @@ function convertFigma(){
     return;
   }
   
-  // 옵션 읽기
   const baseWidth = parseInt(document.getElementById('figma-base-width').value, 10) || 900;
   const addWrapper = document.getElementById('figma-add-wrapper').checked;
   const cqwFonts = document.getElementById('figma-cqw-fonts').checked;
@@ -3439,57 +3493,37 @@ function convertFigma(){
     cleanDefaults
   };
   
-  const stats = {converted:0, wrapped:0, cqwApplied:0, pctApplied:0};
+  const stats = {converted:0, wrapped:0};
   
-  // 파싱
   const parser = new DOMParser();
   const doc = parser.parseFromString(inputHTML, 'text/html');
-  
-  // meta, script, style 등 제거
   doc.querySelectorAll('meta, link, title, script, style, head').forEach(el => el.remove());
-  
   const body = doc.body || doc.documentElement;
   
-  // 최상위 요소 (첫 번째 자식) 찾기 - aspect-ratio 계산용
+  // 최상위 요소 (Figma 프레임)
   const rootEl = body.firstElementChild;
-  let originalSize = null;
-  if(rootEl){
-    originalSize = extractOriginalSize(rootEl);
+  if(!rootEl){
+    showToast('유효한 HTML 요소를 찾을 수 없어요');
+    return;
   }
   
-  // 모든 요소에 변환 적용
-  const allElements = [body, ...body.querySelectorAll('*')];
-  allElements.forEach(el => {
-    if(el.tagName === 'BODY' || el.tagName === 'HTML') return;
-    
-    // id/class 제거 (Caveduck 제약)
-    if(el.id) el.removeAttribute('id');
-    if(el.className) el.removeAttribute('class');
-    
-    const styleStr = el.getAttribute('style') || '';
-    if(!styleStr){
-      // 스타일 없으면 스킵
-      return;
-    }
-    
-    let styleObj = parseInlineStyle(styleStr);
-    styleObj = convertFigmaStyles(styleObj, opts);
-    
-    const finalStr = stringifyInlineStyle(styleObj);
-    if(finalStr) el.setAttribute('style', finalStr);
-    else el.removeAttribute('style');
-    
-    stats.converted++;
-  });
+  const originalSize = extractOriginalSize(rootEl);
+  if(!originalSize.width || !originalSize.height){
+    showToast('⚠ 최상위 요소에 width/height px 값이 필요해요');
+    return;
+  }
+  
+  // 최상위 요소부터 트리 순회
+  // 최상위는 baseWidth를 기준으로 취급 (자기 자신이 컨테이너)
+  convertFigmaTree(rootEl, {width: originalSize.width, height: originalSize.height}, opts, stats);
   
   // 최상위 래퍼 추가
   let result;
-  if(addWrapper && rootEl && originalSize && originalSize.width && originalSize.height){
-    // 최상위 요소의 style에서 width/height/background 뽑아서 재구성
+  if(addWrapper){
     const rootStyle = parseInlineStyle(rootEl.getAttribute('style') || '');
     const bg = rootStyle['background'] || rootStyle['background-color'] || '';
     
-    // 최상위 요소의 width/height/left/top 제거 (래퍼가 처리)
+    // 최상위의 width/height/position 등 래퍼가 처리할 것들 제거
     delete rootStyle['width'];
     delete rootStyle['height'];
     delete rootStyle['left'];
@@ -3499,7 +3533,7 @@ function convertFigma(){
     delete rootStyle['background'];
     delete rootStyle['background-color'];
     
-    // 내부 컨텐츠 보존 (자식들만 뽑음, 래퍼 안 쓸 요소이므로)
+    // 최상위의 자식들만 뽑음
     const innerHTML = rootEl.innerHTML;
     
     const wrapperOuter = `<div style="width:100%;max-width:${baseWidth}px;margin:0 auto${bg ? ';background:' + bg : ''};height:100%">`;
@@ -3512,28 +3546,24 @@ function convertFigma(){
     result = body.innerHTML.trim();
   }
   
-  // 공백 정리
   result = result.replace(/>\s+</g, '><').replace(/\s{2,}/g,' ').trim();
-  
   convertedHTML = result;
   
-  // 통계 헤더
   const statsHTML = 
     '/* ========== FIGMA 변환 완료 ✓ ==========\n' +
     ' * 기준 폭: ' + baseWidth + 'px\n' +
+    ' * 원본 세로: ' + originalSize.height + 'px\n' +
     ' * 요소 변환: ' + stats.converted + '개\n' +
     ' * 래퍼 추가: ' + (stats.wrapped ? 'YES' : 'NO') + '\n' +
     ' * cqw 폰트 스케일링: ' + (cqwFonts ? 'ON' : 'OFF') + '\n' +
     ' * 최종 글자 수: ' + result.length.toLocaleString() + ' chars\n' +
     ' * ============================== */\n\n';
   
-  // 편집 ID 주입 (편집 패널 호환)
   const resultWithIds = (typeof injectEditIds === 'function') ? injectEditIds(result) : result;
   
   document.getElementById('output-code').textContent = statsHTML + resultWithIds;
   document.getElementById('output-code').dataset.original = statsHTML + resultWithIds;
   
-  // 미리보기 갱신
   const iframe = document.getElementById('preview-frame');
   document.getElementById('preview-empty').style.display = 'none';
   iframe.style.display = 'block';
@@ -3543,7 +3573,6 @@ function convertFigma(){
     iframe.srcdoc = resultWithIds;
   }
   
-  // 선택 상태 초기화
   if(typeof selectedEditId !== 'undefined'){
     selectedEditId = null;
     if(typeof updateSelectedInfo === 'function') updateSelectedInfo(null);
