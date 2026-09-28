@@ -3402,7 +3402,18 @@ function convertFigmaStyles(styleObj, opts, parentSize, isAbsolute){
       styleObj[k] = roundTo(px / parentW * 100, dec) + '%';
     }
   });
-  
+  // line-height: px → 원본 비율 (font-size 대비)
+if(styleObj['line-height']){
+  const lhPx = parsePxValue(styleObj['line-height']);
+  const fsPx = parsePxValue(styleObj['font-size']);  // 아직 px일 때!
+  if(lhPx !== null){
+    if(fsPx && fsPx > 0){
+      styleObj['line-height'] = roundTo(lhPx / fsPx, 2).toString();
+    } else {
+      delete styleObj['line-height'];
+    }
+  }
+}
    // cqw 변환 (폰트/테두리) - baseWidth 기준 (컨테이너 폭)
   if(opts.cqwFonts){
     // font-size는 보정 계수 적용 (Figma 텍스트 박스 vs 실제 렌더링 오차 보정)
@@ -3438,16 +3449,6 @@ function convertFigmaStyles(styleObj, opts, parentSize, isAbsolute){
       styleObj['-webkit-text-stroke'] = convertBorderShorthand(styleObj['-webkit-text-stroke'], bw, dec);
     }
   }
-  
-   // line-height 자동 처리 제거 (원본 값 유지)
-// → 브라우저 기본값이 가장 안전. 자동 계산은 폰트마다 편차가 커서 오히려 문제 유발.
-// 원본이 px면 그냥 삭제해서 브라우저 기본에 맡김
-if(styleObj['line-height']){
-  const lhPx = parsePxValue(styleObj['line-height']);
-  if(lhPx !== null){
-    delete styleObj['line-height'];
-  }
-}
 
 // 텍스트 요소 오버플로우 방지: width 없이 position:absolute인 텍스트 div는
 // 부모 폭에 맞춰 자동 줄바꿈되도록 max-width 추가
@@ -3543,15 +3544,6 @@ function convertFigmaTree(el, parentSize, opts, stats){
       }
     }
     
-    // 자기 자신의 width/height는 실효 크기(mySize)로 덮어쓰기
-    // (자식들이 튀어나가서 확장된 경우 대비)
-    if(mySize.width && mySize.width !== mySize.original.width){
-      styleObj['width'] = mySize.width + 'px';  // convertFigmaStyles가 %로 바꿔줌
-    }
-    if(mySize.height && mySize.height !== mySize.original.height){
-      styleObj['height'] = mySize.height + 'px';
-    }
-    
     styleObj = convertFigmaStyles(styleObj, opts, parentSize, isAbsolute);
     
     const finalStr = stringifyInlineStyle(styleObj);
@@ -3566,9 +3558,9 @@ function convertFigmaTree(el, parentSize, opts, stats){
   
   // 자식들에게 넘길 크기 = 실효 크기 (확장된 값)
   const childParentSize = {
-    width: mySize.width || (parentSize && parentSize.width),
-    height: mySize.height || (parentSize && parentSize.height)
-  };
+  width: mySize.original.width || (parentSize && parentSize.width),
+  height: mySize.original.height || (parentSize && parentSize.height)
+};
   
   Array.from(el.children).forEach(child => {
     convertFigmaTree(child, childParentSize, opts, stats);
