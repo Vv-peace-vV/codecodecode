@@ -423,10 +423,30 @@ body{font-family:'IBM Plex Sans KR',sans-serif;background:#f5f5f5;color:#222;hei
 </div>
 
         <div class="section-title">⚙ 현재 적용된 효과</div>
-        <div class="applied-list" id="applied-list">
+                <div class="applied-list" id="applied-list">
           <div class="applied-empty">선택된 요소 없음</div>
         </div>
+
+        <div class="section-title">✂ 스니펫 (드래그 후 클릭)</div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <button class="effect-btn" onclick="applyInlineBlock()" style="flex-direction:row;justify-content:center;padding:8px;font-size:11px">
+            <span class="effect-btn-icon" style="font-size:14px">📦</span> display:inline-block 추가
+          </button>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px">
+            <button class="effect-btn" onclick="wrapSelection('span')" style="padding:8px;font-size:10px;flex-direction:column;gap:2px">
+              <span class="effect-btn-icon" style="font-size:14px">📝</span>span
+            </button>
+            <button class="effect-btn" onclick="wrapSelection('strong')" style="padding:8px;font-size:10px;flex-direction:column;gap:2px">
+              <span class="effect-btn-icon" style="font-size:14px">💪</span>strong
+            </button>
+            <button class="effect-btn" onclick="wrapSelection('details')" style="padding:8px;font-size:10px;flex-direction:column;gap:2px">
+              <span class="effect-btn-icon" style="font-size:14px">📂</span>details
+            </button>
+          </div>
+          <div class="impact-info" style="font-size:9px">💡 <b>드래그</b>: 코드에서 텍스트 선택 후 클릭 · <b>inline-block</b>: 미리보기에서 요소 선택 후 클릭</div>
+        </div>
       </div>
+
 
       <!-- 애니메이션 세부 패널 -->
       <div class="editor-pane" id="pane-animation">
@@ -541,7 +561,7 @@ body{font-family:'IBM Plex Sans KR',sans-serif;background:#f5f5f5;color:#222;hei
         <div class="field-row">
   <span class="field-label">크기</span>
   <input type="number" class="field-input" id="text-fontsize" min="8" max="200" value="14" style="width:70px;padding:4px 8px;font-family:'Share Tech Mono',monospace;font-size:11px;border:1px solid #ddd;border-radius:4px;text-align:center">
-  <span style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#666">px</span>
+  <span id="text-fontsize-unit" style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#666">cqw</span>
 </div>
         <div class="impact-info">⚠ 텍스트는 inset 불가능</div>
  <div class="section-title">━━ 글자 테두리 (Text Stroke) ━━</div>
@@ -549,7 +569,7 @@ body{font-family:'IBM Plex Sans KR',sans-serif;background:#f5f5f5;color:#222;hei
 <div class="field-row">
   <span class="field-label">두께</span>
   <input type="number" class="field-input" id="text-stroke-width" min="0" max="20" value="1" step="0.5" style="width:70px;padding:4px 8px;font-family:'Share Tech Mono',monospace;font-size:11px;border:1px solid #ddd;border-radius:4px;text-align:center">
-  <span style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#666">px (FIGMA 모드 자동 cqw)</span>
+    <span id="text-stroke-unit" style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#666">cqw</span>
 </div>
 <div class="impact-info">💡 두께 0 = 테두리 제거. paint-order 자동 적용</div>
 
@@ -732,7 +752,91 @@ body{font-family:'IBM Plex Sans KR',sans-serif;background:#f5f5f5;color:#222;hei
 
 <script>
 'use strict';
+// ============================================================
+// ✂ 스니펫 시스템
+// ============================================================
+// 모드에 따라 텍스트 효과 패널 단위 라벨 갱신
+function updateTextUnitLabels(){
+  const unit = (typeof currentMode !== 'undefined' && currentMode === 'figma') ? 'cqw' : 'px';
+  const fs = document.getElementById('text-fontsize-unit');
+  const ts = document.getElementById('text-stroke-unit');
+  if(fs) fs.textContent = unit;
+  if(ts) ts.textContent = unit;
+  
+  // 입력 필드 기본값도 모드에 맞게 조정
+  const fsInput = document.getElementById('text-fontsize');
+  const tsInput = document.getElementById('text-stroke-width');
+  if(unit === 'cqw'){
+    // cqw는 작은 값 (0.1 단위)
+    if(fsInput){ fsInput.step = '0.1'; fsInput.min = '0.1'; fsInput.max = '30'; }
+    if(tsInput){ tsInput.step = '0.05'; tsInput.min = '0'; tsInput.max = '5'; }
+  } else {
+    // px는 정수 단위
+    if(fsInput){ fsInput.step = '1'; fsInput.min = '8'; fsInput.max = '200'; }
+    if(tsInput){ tsInput.step = '0.5'; tsInput.min = '0'; tsInput.max = '20'; }
+  }
+}
+function applyInlineBlock(){
+  if(typeof selectedEditId === 'undefined' || selectedEditId === null){
+    showToast('먼저 미리보기에서 요소를 선택하세요');
+    return;
+  }
+  if(typeof applyStyleToSelected === 'function'){
+    applyStyleToSelected({ 'display': 'inline-block' });
+  }
+  showToast('display:inline-block 적용');
+}
 
+function wrapSelection(tagType){
+  const codeEl = document.getElementById('output-code');
+  const sel = window.getSelection();
+  
+  if(!sel || sel.rangeCount === 0 || sel.isCollapsed){
+    showToast('코드 영역에서 텍스트를 드래그해주세요');
+    return;
+  }
+  
+  const range = sel.getRangeAt(0);
+  if(!codeEl.contains(range.commonAncestorContainer)){
+    showToast('코드 영역 안에서 드래그해주세요');
+    return;
+  }
+  
+  const selectedText = sel.toString();
+  if(!selectedText){
+    showToast('선택된 텍스트가 없어요');
+    return;
+  }
+  
+  let openTag = '', closeTag = '';
+  if(tagType === 'span'){
+    openTag = '<span>'; closeTag = '</span>';
+  } else if(tagType === 'strong'){
+    openTag = '<strong>'; closeTag = '</strong>';
+  } else if(tagType === 'details'){
+    const label = prompt('접기 제목을 입력하세요', '자세히 보기');
+    if(label === null) return;
+    const safeLabel = (label.trim() || '자세히 보기').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    openTag = '<details><summary>' + safeLabel + '</summary>';
+    closeTag = '</details>';
+  } else {
+    return;
+  }
+  
+  const wrapped = openTag + selectedText + closeTag;
+  range.deleteContents();
+  range.insertNode(document.createTextNode(wrapped));
+  sel.removeAllRanges();
+  
+  if(typeof applyCodeEdit === 'function'){
+    applyCodeEdit();
+  } else {
+    convertedHTML = codeEl.textContent.replace(/^\/\*[\s\S]*?\*\/\s*/, '').trim();
+    if(typeof updateOutputCounter === 'function') updateOutputCounter();
+  }
+  
+  showToast('<' + tagType + '>로 감쌌어요!');
+}
 // ============================================================
 // ⭐ 잔여 찌꺼기 방지 로직 (CORE - 글자수 한도 때문에 핵심!)
 // ============================================================
@@ -1102,6 +1206,8 @@ function addGradStop(config){
 
 // 그라데이션 사용자 각도 표시 토글
 document.addEventListener('DOMContentLoaded', () => {
+  // 텍스트 효과 패널 단위 라벨 초기화
+  if(typeof updateTextUnitLabels === 'function') updateTextUnitLabels();
   const dirSel = document.getElementById('grad-direction');
   const customRow = document.getElementById('grad-custom-row');
   if(dirSel && customRow){
@@ -2499,23 +2605,15 @@ function applyTextStroke(){
   }
   
   const color = textStrokePicker ? textStrokePicker.getRgba() : 'white';
-  
-  // FIGMA 모드면 cqw로, 아니면 px로
-  let strokeValue;
-  if(typeof currentMode !== 'undefined' && currentMode === 'figma'){
-    const baseWidth = parseInt(document.getElementById('figma-base-width').value, 10) || 900;
-    const cqw = Math.round((width / baseWidth * 100) * 100) / 100;
-    strokeValue = cqw + 'cqw ' + color;
-    showToast('테두리 적용: ' + cqw + 'cqw');
-  } else {
-    strokeValue = width + 'px ' + color;
-    showToast('테두리 적용: ' + width + 'px');
-  }
+  const isFigma = (typeof currentMode !== 'undefined' && currentMode === 'figma');
+  const unit = isFigma ? 'cqw' : 'px';
+  const strokeValue = width + unit + ' ' + color;
   
   applyStyleToSelected({
     '-webkit-text-stroke': strokeValue,
     'paint-order': 'stroke fill'
   });
+  showToast('테두리 적용: ' + width + unit);
   closeSubPane();
 }
 
@@ -3270,6 +3368,9 @@ function switchMode(mode){
   
   // 새 모드의 저장물 복원
   autoLoad();
+  
+  // 텍스트 효과 패널 단위 라벨 갱신
+  if(typeof updateTextUnitLabels === 'function') updateTextUnitLabels();
   
   showToast(mode === 'figma' ? '🎨 FIGMA 모드' : '🧩 GRAPES 모드');
 }
