@@ -3119,15 +3119,468 @@ document.addEventListener('keydown', e => {
     if(btn && !btn.disabled) btn.click();
   }
 });
+// ============================================================
+// 🎨 모드 전환 (FIGMA / GRAPES)
+// ============================================================
+
+let currentMode = 'figma'; // 기본 모드
+const MODE_KEY = 'filemigrator_mode_v1';
+
+function switchMode(mode){
+  if(mode !== 'figma' && mode !== 'grapes') return;
+  if(mode === currentMode) return;
+  
+  // 현재 작업물 자동저장 (모드별 키)
+  autoSave();
+  
+  currentMode = mode;
+  
+  // 입력 패널 data-mode 갱신 → CSS가 알아서 UI 전환
+  const panel = document.getElementById('input-panel');
+  if(panel) panel.setAttribute('data-mode', mode);
+  
+  // 토글 버튼 active 상태 갱신
+  document.querySelectorAll('#mode-toggle button').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === mode);
+  });
+  
+  // 라벨/힌트 텍스트 갱신
+  const label = document.getElementById('html-label-text');
+  const sub = document.getElementById('panel-sub-text');
+  const htmlInput = document.getElementById('input-html');
+  if(mode === 'figma'){
+    if(label) label.textContent = 'FIGMA HTML';
+    if(sub) sub.textContent = 'Figma 코드 붙여넣기';
+    if(htmlInput) htmlInput.placeholder = 'Figma에서 복사한 코드를 붙여넣으세요';
+  } else {
+    if(label) label.textContent = 'HTML';
+    if(sub) sub.textContent = 'HTML/CSS 둘 다 / 하나만 OK';
+    if(htmlInput) htmlInput.placeholder = "<div id='abc'>...</div> 또는 <html>...</html> 통째로 붙여넣기";
+  }
+  
+  // 모드 선택 자체를 저장
+  try { localStorage.setItem(MODE_KEY, mode); } catch(e){}
+  
+  // 새 모드의 저장물 복원
+  autoLoad();
+  
+  showToast(mode === 'figma' ? '🎨 FIGMA 모드' : '🧩 GRAPES 모드');
+}
+
+// ============================================================
+// 🔀 자동저장 키를 모드별로 분리 (기존 autoSave/autoLoad 오버라이드)
+// ============================================================
+
+// 원본 함수 백업 (혹시 참조하는 곳 있을까봐 안전하게)
+const _origAutoSave = autoSave;
+const _origAutoLoad = autoLoad;
+
+function _getSaveKey(){
+  return 'filemigrator_autosave_' + currentMode + '_v1';
+}
+
+autoSave = function(){
+  try {
+    const data = {
+      mode: currentMode,
+      html: document.getElementById('input-html').value,
+      css: document.getElementById('input-css') ? document.getElementById('input-css').value : '',
+      output: convertedHTML,
+      timestamp: Date.now()
+    };
+    const json = JSON.stringify(data);
+    if(json.length > 4 * 1024 * 1024){
+      console.warn('[autosave] 용량 초과로 저장 생략');
+      return;
+    }
+    localStorage.setItem(_getSaveKey(), json);
+    lastSavedAt = Date.now();
+    showAutoSaveIndicator();
+  } catch(e){
+    console.warn('[autosave] 실패:', e);
+  }
+};
+
+autoLoad = function(){
+  try {
+    const raw = localStorage.getItem(_getSaveKey());
+    // 입력창 초기화 (모드 전환 시 이전 모드 내용 남지 않게)
+    document.getElementById('input-html').value = '';
+    const cssEl = document.getElementById('input-css');
+    if(cssEl) cssEl.value = '';
+    
+    if(!raw){
+      updateCounters();
+      return false;
+    }
+    const data = JSON.parse(raw);
+    if(data.html) document.getElementById('input-html').value = data.html;
+    if(data.css && cssEl) cssEl.value = data.css;
+    updateCounters();
+    if(data.timestamp){
+      const ago = Math.round((Date.now() - data.timestamp) / 1000);
+      const agoText = ago < 60 ? ago + '초 전' : Math.round(ago/60) + '분 전';
+      showToast('이전 작업물 복원됨 (' + agoText + ')');
+    }
+    return true;
+  } catch(e){
+    console.warn('[autoload] 실패:', e);
+    return false;
+  }
+};
+
+// ============================================================
+// 🔀 convert() 디스패처 (모드별 분기)
+// ============================================================
+
+// 기존 convert() 함수를 convertGrapes로 재할당
+const convertGrapes = convert;
+
+// 새 convert = 디스패처
+convert = function(){
+  if(currentMode === 'figma'){
+    convertFigma();
+  } else {
+    convertGrapes();
+  }
+};
+
+// ============================================================
+// 🎨 Figma → Caveduck 변환 로직
+// ============================================================
+
+/**
+ * px 값을 %로 변환 (좌표/크기용)
+ * @param {number} px
+ * @param {number} baseWidth 기준 폭 (보통 900)
+ * @param {number} decimals 소수점 자릿수
+ */
+function pxToPercent(px, baseWidth, decimals){
+  const v = (px / baseWidth) * 100;
+  return roundTo(v, decimals) + '%';
+}
+
+/**
+ * px 값을 cqw로 변환 (폰트/테두리용)
+ */
+function pxToCqw(px, baseWidth, decimals){
+  const v = (px / baseWidth) * 100;
+  return roundTo(v, decimals) + 'cqw';
+}
+
+function roundTo(v, decimals){
+  if(decimals == null || decimals < 0) return v;
+  const p = Math.pow(10, decimals);
+  return Math.round(v * p) / p;
+}
+
+/**
+ * "24px" → 24 (숫자만 추출), 아니면 null
+ */
+function parsePxValue(str){
+  if(typeof str !== 'string') return null;
+  const m = str.trim().match(/^(-?\d+(?:\.\d+)?)px$/);
+  return m ? parseFloat(m[1]) : null;
+}
+
+/**
+ * "1.50px black solid" 같은 border 단축형에서 px 부분만 cqw로 변환
+ */
+function convertBorderShorthand(val, baseWidth, decimals){
+  if(typeof val !== 'string') return val;
+  return val.replace(/(-?\d+(?:\.\d+)?)px/g, (_, n) => {
+    return roundTo(parseFloat(n) / baseWidth * 100, decimals) + 'cqw';
+  });
+}
+
+/**
+ * 스타일 객체에서 Figma 변환 규칙 적용
+ * @param {object} styleObj parseInlineStyle 결과
+ * @param {object} opts {baseWidth, cqwFonts, decimals, cleanDefaults}
+ */
+function convertFigmaStyles(styleObj, opts){
+  const bw = opts.baseWidth;
+  const dec = opts.decimals;
+  
+  // 1. 좌표 → %  (left, top, right, bottom)
+  ['left','top','right','bottom'].forEach(k => {
+    const px = parsePxValue(styleObj[k]);
+    if(px !== null){
+      styleObj[k] = pxToPercent(px, bw, dec);
+    }
+  });
+  
+  // 2. 크기 → %  (width, height)
+  ['width','height'].forEach(k => {
+    const px = parsePxValue(styleObj[k]);
+    if(px !== null){
+      styleObj[k] = pxToPercent(px, bw, dec);
+    }
+  });
+  
+  // 3. padding 4방향 → %
+  ['padding','padding-top','padding-right','padding-bottom','padding-left',
+   'margin','margin-top','margin-right','margin-bottom','margin-left'].forEach(k => {
+    const px = parsePxValue(styleObj[k]);
+    if(px !== null){
+      styleObj[k] = pxToPercent(px, bw, dec);
+    }
+  });
+  
+  // 4. border-radius 4방향 → %
+  ['border-radius','border-top-left-radius','border-top-right-radius',
+   'border-bottom-left-radius','border-bottom-right-radius'].forEach(k => {
+    const px = parsePxValue(styleObj[k]);
+    if(px !== null){
+      styleObj[k] = pxToPercent(px, bw, dec);
+    }
+  });
+  
+  // 5. cqw 변환 (폰트/테두리) - 옵션에 따라
+  if(opts.cqwFonts){
+    // font-size, letter-spacing, line-height (px일 때만)
+    ['font-size','letter-spacing'].forEach(k => {
+      const px = parsePxValue(styleObj[k]);
+      if(px !== null){
+        styleObj[k] = pxToCqw(px, bw, dec);
+      }
+    });
+    
+    // border 단축형 (1.50px black solid → 0.17cqw black solid)
+    ['border','border-top','border-right','border-bottom','border-left','outline'].forEach(k => {
+      if(styleObj[k] && /\d+(?:\.\d+)?px/.test(styleObj[k])){
+        styleObj[k] = convertBorderShorthand(styleObj[k], bw, dec);
+      }
+    });
+    
+    // border-width 개별
+    ['border-width','border-top-width','border-right-width','border-bottom-width','border-left-width'].forEach(k => {
+      const px = parsePxValue(styleObj[k]);
+      if(px !== null){
+        styleObj[k] = pxToCqw(px, bw, dec);
+      }
+    });
+    
+    // -webkit-text-stroke
+    if(styleObj['-webkit-text-stroke'] && /\d+(?:\.\d+)?px/.test(styleObj['-webkit-text-stroke'])){
+      styleObj['-webkit-text-stroke'] = convertBorderShorthand(styleObj['-webkit-text-stroke'], bw, dec);
+    }
+  }
+  
+  // 6. line-height는 px면 unitless(1.5 등)로 (한글 가독성)
+  const lh = styleObj['line-height'];
+  if(lh){
+    const lhPx = parsePxValue(lh);
+    const fs = parsePxValue(styleObj['font-size']);
+    if(lhPx !== null && fs){
+      // 원본 폰트대비 배수로 변환
+      styleObj['line-height'] = roundTo(lhPx / fs, 2).toString();
+    } else if(lhPx !== null){
+      // font-size 없으면 그냥 1.4로
+      styleObj['line-height'] = '1.4';
+    }
+  }
+  
+  // 7. 기본값 정리 (옵션)
+  if(opts.cleanDefaults){
+    if(styleObj['word-wrap'] === 'break-word') delete styleObj['word-wrap'];
+    if(styleObj['overflow-wrap'] === 'break-word') delete styleObj['overflow-wrap'];
+    // font-weight:400 제거 (기본값)
+    if(styleObj['font-weight'] === '400' || styleObj['font-weight'] === 'normal') delete styleObj['font-weight'];
+    // Figma가 자주 넣는 무의미한 것들
+    if(styleObj['display'] === 'inline-flex' && !styleObj['flex-direction'] && !styleObj['justify-content'] && !styleObj['align-items'] && !styleObj['gap']){
+      // 순수 inline-flex만 있고 flex 자식 정렬이 없으면 삭제 후보 (하지만 안전하게 유지)
+    }
+  }
+  
+  return styleObj;
+}
+
+/**
+ * 컨테이너 요소인지 판단 (자식이 있는 div)
+ * Figma는 대부분 div로 나옴
+ */
+function isFigmaContainer(el){
+  return el.tagName === 'DIV' && el.children.length > 0;
+}
+
+/**
+ * 최상위 요소에서 원본 width/height 추출 (aspect-ratio 계산용)
+ */
+function extractOriginalSize(el){
+  const styleStr = el.getAttribute('style') || '';
+  const map = parseInlineStyle(styleStr);
+  return {
+    width: parsePxValue(map['width']),
+    height: parsePxValue(map['height'])
+  };
+}
+
+/**
+ * Figma 메인 변환 함수
+ */
+function convertFigma(){
+  const inputHTML = document.getElementById('input-html').value.trim();
+  if(!inputHTML){
+    showToast('Figma 코드를 입력해주세요');
+    return;
+  }
+  
+  // 옵션 읽기
+  const baseWidth = parseInt(document.getElementById('figma-base-width').value, 10) || 900;
+  const addWrapper = document.getElementById('figma-add-wrapper').checked;
+  const cqwFonts = document.getElementById('figma-cqw-fonts').checked;
+  const doRound = document.getElementById('figma-round').checked;
+  const cleanDefaults = document.getElementById('figma-clean-defaults').checked;
+  const opts = {
+    baseWidth,
+    cqwFonts,
+    decimals: doRound ? 2 : -1,
+    cleanDefaults
+  };
+  
+  const stats = {converted:0, wrapped:0, cqwApplied:0, pctApplied:0};
+  
+  // 파싱
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(inputHTML, 'text/html');
+  
+  // meta, script, style 등 제거
+  doc.querySelectorAll('meta, link, title, script, style, head').forEach(el => el.remove());
+  
+  const body = doc.body || doc.documentElement;
+  
+  // 최상위 요소 (첫 번째 자식) 찾기 - aspect-ratio 계산용
+  const rootEl = body.firstElementChild;
+  let originalSize = null;
+  if(rootEl){
+    originalSize = extractOriginalSize(rootEl);
+  }
+  
+  // 모든 요소에 변환 적용
+  const allElements = [body, ...body.querySelectorAll('*')];
+  allElements.forEach(el => {
+    if(el.tagName === 'BODY' || el.tagName === 'HTML') return;
+    
+    // id/class 제거 (Caveduck 제약)
+    if(el.id) el.removeAttribute('id');
+    if(el.className) el.removeAttribute('class');
+    
+    const styleStr = el.getAttribute('style') || '';
+    if(!styleStr){
+      // 스타일 없으면 스킵
+      return;
+    }
+    
+    let styleObj = parseInlineStyle(styleStr);
+    styleObj = convertFigmaStyles(styleObj, opts);
+    
+    const finalStr = stringifyInlineStyle(styleObj);
+    if(finalStr) el.setAttribute('style', finalStr);
+    else el.removeAttribute('style');
+    
+    stats.converted++;
+  });
+  
+  // 최상위 래퍼 추가
+  let result;
+  if(addWrapper && rootEl && originalSize && originalSize.width && originalSize.height){
+    // 최상위 요소의 style에서 width/height/background 뽑아서 재구성
+    const rootStyle = parseInlineStyle(rootEl.getAttribute('style') || '');
+    const bg = rootStyle['background'] || rootStyle['background-color'] || '';
+    
+    // 최상위 요소의 width/height/left/top 제거 (래퍼가 처리)
+    delete rootStyle['width'];
+    delete rootStyle['height'];
+    delete rootStyle['left'];
+    delete rootStyle['top'];
+    delete rootStyle['position'];
+    delete rootStyle['overflow'];
+    delete rootStyle['background'];
+    delete rootStyle['background-color'];
+    
+    // 내부 컨텐츠 보존 (자식들만 뽑음, 래퍼 안 쓸 요소이므로)
+    const innerHTML = rootEl.innerHTML;
+    
+    const wrapperOuter = `<div style="width:100%;max-width:${baseWidth}px;margin:0 auto${bg ? ';background:' + bg : ''};height:100%">`;
+    const wrapperInner = `<div style="width:100%;aspect-ratio:${baseWidth}/${originalSize.height};position:relative;overflow:hidden;container-type:inline-size">`;
+    const wrapperClose = `</div></div>`;
+    
+    result = wrapperOuter + wrapperInner + innerHTML + wrapperClose;
+    stats.wrapped = 1;
+  } else {
+    result = body.innerHTML.trim();
+  }
+  
+  // 공백 정리
+  result = result.replace(/>\s+</g, '><').replace(/\s{2,}/g,' ').trim();
+  
+  convertedHTML = result;
+  
+  // 통계 헤더
+  const statsHTML = 
+    '/* ========== FIGMA 변환 완료 ✓ ==========\n' +
+    ' * 기준 폭: ' + baseWidth + 'px\n' +
+    ' * 요소 변환: ' + stats.converted + '개\n' +
+    ' * 래퍼 추가: ' + (stats.wrapped ? 'YES' : 'NO') + '\n' +
+    ' * cqw 폰트 스케일링: ' + (cqwFonts ? 'ON' : 'OFF') + '\n' +
+    ' * 최종 글자 수: ' + result.length.toLocaleString() + ' chars\n' +
+    ' * ============================== */\n\n';
+  
+  // 편집 ID 주입 (편집 패널 호환)
+  const resultWithIds = (typeof injectEditIds === 'function') ? injectEditIds(result) : result;
+  
+  document.getElementById('output-code').textContent = statsHTML + resultWithIds;
+  document.getElementById('output-code').dataset.original = statsHTML + resultWithIds;
+  
+  // 미리보기 갱신
+  const iframe = document.getElementById('preview-frame');
+  document.getElementById('preview-empty').style.display = 'none';
+  iframe.style.display = 'block';
+  if(typeof buildPreviewWithClickHandler === 'function'){
+    iframe.srcdoc = buildPreviewWithClickHandler(resultWithIds);
+  } else {
+    iframe.srcdoc = resultWithIds;
+  }
+  
+  // 선택 상태 초기화
+  if(typeof selectedEditId !== 'undefined'){
+    selectedEditId = null;
+    if(typeof updateSelectedInfo === 'function') updateSelectedInfo(null);
+  }
+  
+  updateOutputCounter();
+  showToast('FIGMA 변환 완료! (' + result.length.toLocaleString() + ' chars)');
+  if(typeof pushHistory === 'function') pushHistory();
+  autoSave();
+}
 
 // ============================================================
 // 초기 실행
 // ============================================================
 
+// 저장된 모드 복원 (없으면 figma가 기본)
+try {
+  const savedMode = localStorage.getItem(MODE_KEY);
+  if(savedMode === 'grapes' || savedMode === 'figma'){
+    // switchMode는 diff가 있어야만 동작 → 기본이 figma라서
+    // grapes 저장돼 있으면 전환, figma면 그대로
+    if(savedMode !== currentMode){
+      switchMode(savedMode);
+    } else {
+      autoLoad(); // 같은 모드면 그냥 로드
+    }
+  } else {
+    autoLoad();
+  }
+} catch(e){
+  autoLoad();
+}
+
 updateCounters();
 updateOutputCounter();
-autoLoad();  // 새로고침 후 작업물 복원
 initCodeEditor();
+
 // 콘솔 안내
 console.log('%c[FILE MIGRATOR] Phase 1 로드 완료', 'color:#1a6b3a;font-weight:bold');
 console.log('잔여 찌꺼기 방지 테스트: window.__testCleanStyle()');
