@@ -270,6 +270,10 @@ body{font-family:'IBM Plex Sans KR',sans-serif;background:#f5f5f5;color:#222;hei
           <input type="number" class="opt-num" id="figma-base-width" min="100" max="4000" value="900">
         </div>
         <label class="opt-check">
+  <input type="checkbox" id="figma-lock-ratio" checked>
+  요소별 aspect-ratio 자동 (비율 완벽 유지 ⭐)
+</label>
+        <label class="opt-check">
           <input type="checkbox" id="figma-add-wrapper" checked>
           최상위 래퍼 자동 추가 (max-width + aspect-ratio)
         </label>
@@ -3472,6 +3476,21 @@ function convertFigmaTree(el, parentSize, opts, stats){
     
     let styleObj = parseInlineStyle(styleStr);
     const isAbsolute = styleObj['position'] === 'absolute';
+        
+    // 🔒 aspect-ratio 자동 잠금 (비율 유지 - 폰트/박스 미스매치 방지)
+    const lockRatio = document.getElementById('figma-lock-ratio') && document.getElementById('figma-lock-ratio').checked;
+    if(lockRatio){
+      const originW = parsePxValue(styleObj['width']);
+      const originH = parsePxValue(styleObj['height']);
+      // 최상위 요소는 이미 래퍼에서 aspect-ratio 처리 → 스킵
+      // 최상위가 아닌, 명확한 크기가 있는 요소만
+      if(originW && originH && el !== el.ownerDocument.body.firstElementChild){
+        // aspect-ratio 세팅
+        styleObj['aspect-ratio'] = originW + '/' + originH;
+        // height를 지우고 width만 %로 → 세로는 aspect-ratio가 결정
+        delete styleObj['height'];
+      }
+    }
     
     // 자기 자신의 width/height는 실효 크기(mySize)로 덮어쓰기
     // (자식들이 튀어나가서 확장된 경우 대비)
