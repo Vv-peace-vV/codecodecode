@@ -3439,42 +3439,37 @@ function convertFigmaStyles(styleObj, opts, parentSize, isAbsolute){
     }
   }
   
-    // line-height: 원본 비율 × 여유 계수 (Figma → 실제 렌더링 보정)
-  const lh = styleObj['line-height'];
-  if(lh){
-    const lhPx = parsePxValue(lh);
-    if(lhPx !== null){
-      // font-size 원본 px 값 역산
-      let fsPx = null;
-      const fsRaw = styleObj['font-size'];
-      if(fsRaw){
-        const fsPxDirect = parsePxValue(fsRaw);
-        if(fsPxDirect !== null){
-          fsPx = fsPxDirect;
-        } else {
-          const cqwMatch = String(fsRaw).match(/^(-?\d+(?:\.\d+)?)cqw$/);
-          if(cqwMatch){
-            const scale = opts.fontScale || 1;
-            fsPx = parseFloat(cqwMatch[1]) * opts.baseWidth / 100 / scale;
-          }
-        }
-      }
-      if(fsPx && fsPx > 0){
-        // 원본 비율 계산
-        const rawRatio = lhPx / fsPx;
-        // 여유 계수 적용 (Figma 타이트한 값 → 실제 렌더링 여유)
-        const looseness = opts.lineHeightLooseness || 1.2;
-        let finalRatio = rawRatio * looseness;
-        // 최소값/최대값 클램프 (너무 붙거나 너무 벌어지지 않게)
-        finalRatio = Math.max(1.0, Math.min(2.0, finalRatio));
-        styleObj['line-height'] = roundTo(finalRatio, 2).toString();
-      } else {
-        styleObj['line-height'] = '1.3';
+   // line-height 자동 처리 제거 (원본 값 유지)
+// → 브라우저 기본값이 가장 안전. 자동 계산은 폰트마다 편차가 커서 오히려 문제 유발.
+// 원본이 px면 그냥 삭제해서 브라우저 기본에 맡김
+if(styleObj['line-height']){
+  const lhPx = parsePxValue(styleObj['line-height']);
+  if(lhPx !== null){
+    delete styleObj['line-height'];
+  }
+}
+
+// 텍스트 요소 오버플로우 방지: width 없이 position:absolute인 텍스트 div는
+// 부모 폭에 맞춰 자동 줄바꿈되도록 max-width 추가
+if(isAbsolute && !styleObj['width']){
+  // 자식이 텍스트 위주면 (span/br/텍스트 노드) → max-width로 감쌈
+  // 여기서는 스타일 단계라 자식 판별 어려우니 무조건 적용해도 무방
+  // 부모의 남은 폭까지 사용하도록
+  if(!styleObj['max-width']){
+    // left/right이 %면 parent 폭 기준 계산
+    const leftStr = styleObj['left'];
+    if(leftStr && leftStr.endsWith('%')){
+      const leftPct = parseFloat(leftStr);
+      const maxW = roundTo(100 - leftPct - 2, dec); // 오른쪽 2% 여백
+      if(maxW > 10){
+        styleObj['max-width'] = maxW + '%';
+        styleObj['word-break'] = 'keep-all';
+        styleObj['overflow-wrap'] = 'break-word';
       }
     }
   }
+}
 
-  
   // 기본값 정리
   if(opts.cleanDefaults){
     if(styleObj['word-wrap'] === 'break-word') delete styleObj['word-wrap'];
