@@ -544,9 +544,19 @@ body{font-family:'IBM Plex Sans KR',sans-serif;background:#f5f5f5;color:#222;hei
   <span style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#666">px</span>
 </div>
         <div class="impact-info">⚠ 텍스트는 inset 불가능</div>
+ <div class="section-title">━━ 글자 테두리 (Text Stroke) ━━</div>
+<div id="text-stroke-color-picker"></div>
+<div class="field-row">
+  <span class="field-label">두께</span>
+  <input type="number" class="field-input" id="text-stroke-width" min="0" max="20" value="1" step="0.5" style="width:70px;padding:4px 8px;font-family:'Share Tech Mono',monospace;font-size:11px;border:1px solid #ddd;border-radius:4px;text-align:center">
+  <span style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#666">px (FIGMA 모드 자동 cqw)</span>
+</div>
+<div class="impact-info">💡 두께 0 = 테두리 제거. paint-order 자동 적용</div>
+
 <div class="action-pair">
   <button class="btn-success" onclick="applyFontSize()" style="background:#cc99ff">🔠 크기</button>
   <button class="btn-success" onclick="applyTextColor()" style="background:#74c0fc">🔤 글자색</button>
+  <button class="btn-success" onclick="applyTextStroke()" style="background:#ff9999">🖌 테두리</button>
   <button class="btn-success" onclick="applyTextShadow()">✓ 그림자</button>
   <button class="btn-secondary" onclick="closeSubPane()">✗</button>
 </div>
@@ -1000,7 +1010,11 @@ function openSubPane(name){
     textShadowPicker = createColorPicker(document.getElementById('textshadow-color-picker'), {
       initial:'#ffd43b', alpha:1
     });
-  }
+    if(name === 'text-shadow' && !textStrokePicker){
+  textStrokePicker = createColorPicker(document.getElementById('text-stroke-color-picker'), {
+    initial: '#ffffff', alpha: 1
+  });
+}
   if(name === 'gradient' && gradStopPickers.length === 0){
     initGradientStops();
   }
@@ -1835,25 +1849,40 @@ stats.fontInherited = inheritFontFamily(body);
 }
 
 function copyOutput(){
-  if(!convertedHTML){ showToast('변환된 결과가 없어요'); return; }
-  // data-edit-id는 편집용이니까 복사할 땐 제거
-  const cleanHTML = stripEditIds(convertedHTML);
-  navigator.clipboard.writeText(cleanHTML).then(()=>showToast('복사 완료! (' + cleanHTML.length.toLocaleString() + ' chars)'));
+  const codeEl = document.getElementById('output-code');
+  let text = codeEl.dataset.original || codeEl.textContent;
+  
+  // ⭐ data-edit-id 속성 완전 제거
+  text = text.replace(/\s*data-edit-id="[^"]*"/g, '');
+  
+  if(!text.trim()){
+    showToast('복사할 내용이 없어요');
+    return;
+  }
+  navigator.clipboard.writeText(text).then(() => {
+    showToast('📋 복사 완료! (data-edit-id 제거됨)');
+  }).catch(() => {
+    showToast('복사 실패 - 수동으로 선택해주세요');
+  });
 }
 
 function downloadOutput(){
-  if(!convertedHTML){ showToast('변환된 결과가 없어요'); return; }
-  const cleanHTML = stripEditIds(convertedHTML);
-  const blob = new Blob([cleanHTML], {type:'text/html'});
+  const codeEl = document.getElementById('output-code');
+  let text = codeEl.dataset.original || codeEl.textContent;
+  text = text.replace(/\s*data-edit-id="[^"]*"/g, '');
+  
+  if(!text.trim()){ showToast('다운로드할 내용이 없어요'); return; }
+  const blob = new Blob([text], {type:'text/html;charset=utf-8'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'caveduck_'+Date.now()+'.html';
+  a.download = 'caveduck-widget.html';
+  document.body.appendChild(a);
   a.click();
+  document.body.removeChild(a);
   URL.revokeObjectURL(url);
-  showToast('다운로드 시작');
+  showToast('⬇ 다운로드 완료');
 }
-
 
 // ============================================================
 // 인풋 패널 접기/펼치기
@@ -2447,6 +2476,60 @@ function applyFontSize(){
   closeSubPane();
 }
 
+  let textStrokePicker = null;
+
+function applyTextStroke(){
+  const width = parseFloat(document.getElementById('text-stroke-width').value) || 0;
+  
+  // 두께 0이면 제거
+  if(width <= 0){
+    if(!selectedEditId && selectedEditId !== 0){ showToast('먼저 요소를 선택해주세요'); return; }
+    const iframe = document.getElementById('preview-frame');
+    const el = iframe.contentDocument.querySelector('[data-edit-id="'+selectedEditId+'"]');
+    if(el){
+      removeStyleProperty(el, ['-webkit-text-stroke','paint-order']);
+      const newHTML = iframe.contentDocument.body.innerHTML;
+      convertedHTML = newHTML.replace(/<script>[\s\S]*?<\/script>/g,'').trim();
+      updateOutputCodeAfterEdit();
+      showToast('테두리 제거');
+    }
+    closeSubPane();
+    return;
+  }
+  
+  const color = textStrokePicker ? textStrokePicker.getRgba() : 'white';
+  
+  // FIGMA 모드면 cqw로, 아니면 px로
+  let strokeValue;
+  if(typeof currentMode !== 'undefined' && currentMode === 'figma'){
+    const baseWidth = parseInt(document.getElementById('figma-base-width').value, 10) || 900;
+    const cqw = Math.round((width / baseWidth * 100) * 100) / 100;
+    strokeValue = cqw + 'cqw ' + color;
+    showToast('테두리 적용: ' + cqw + 'cqw');
+  } else {
+    strokeValue = width + 'px ' + color;
+    showToast('테두리 적용: ' + width + 'px');
+  }
+  
+  applyStyleToSelected({
+    '-webkit-text-stroke': strokeValue,
+    'paint-order': 'stroke fill'
+  });
+  closeSubPane();
+}
+
+// updateOutputCodeAfterEdit 헬퍼 (없으면 만들기, 있으면 스킵)
+function updateOutputCodeAfterEdit(){
+  const codeEl = document.getElementById('output-code');
+  const oldText = codeEl.dataset.original || codeEl.textContent;
+  const headerMatch = oldText.match(/^\/\*[\s\S]*?\*\/\n*/);
+  const header = headerMatch ? headerMatch[0] : '';
+  const cleanLength = (typeof stripEditIds === 'function') ? stripEditIds(convertedHTML).length : convertedHTML.length;
+  const newHeader = header.replace(/(\* 최종 글자 수: )[\d,]+( chars)/, '$1'+cleanLength.toLocaleString()+'$2');
+  codeEl.dataset.original = newHeader + convertedHTML;
+  codeEl.textContent = newHeader + convertedHTML;
+  updateOutputCounter();
+}
 
 // ============================================================
 // 🎨 그라데이션 (background) 적용
