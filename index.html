@@ -3426,25 +3426,62 @@ function convertFigmaStyles(styleObj, opts, parentSize, isAbsolute){
 }
 
 /**
+ * 요소의 "실효 크기" 계산
+ * - 자기 원본 크기와, 자식들이 실제 차지하는 범위(top+height, left+width의 최댓값) 중 큰 것
+ * - Figma가 만든 wrapper 크기가 자식보다 작을 때 자동 보정
+ */
+function computeEffectiveSize(el){
+  const my = extractOriginalSize(el);
+  let maxW = my.width || 0;
+  let maxH = my.height || 0;
+  
+  Array.from(el.children).forEach(child => {
+    const cStyle = parseInlineStyle(child.getAttribute('style') || '');
+    // 자식이 position:absolute일 때만 top/left+크기가 부모 크기에 영향
+    if(cStyle['position'] === 'absolute'){
+      const cLeft = parsePxValue(cStyle['left']) || 0;
+      const cTop = parsePxValue(cStyle['top']) || 0;
+      const cW = parsePxValue(cStyle['width']) || 0;
+      const cH = parsePxValue(cStyle['height']) || 0;
+      const rightEdge = cLeft + cW;
+      const bottomEdge = cTop + cH;
+      if(rightEdge > maxW) maxW = rightEdge;
+      if(bottomEdge > maxH) maxH = bottomEdge;
+    }
+  });
+  
+  return {
+    width: maxW || my.width,
+    height: maxH || my.height,
+    original: my  // 원본도 유지 (자기 style 변환 시 사용)
+  };
+}
+
+/**
  * DOM 트리를 재귀 순회하며 각 요소를 부모 크기 기준으로 변환
- * @param {Element} el 현재 요소
- * @param {object} parentSize 부모의 원본 px 크기 {width, height}
- * @param {object} opts 변환 옵션
- * @param {object} stats 통계 카운터
  */
 function convertFigmaTree(el, parentSize, opts, stats){
-  // 현재 요소의 원본 크기를 먼저 뽑기 (자식들에게 넘겨줄 값)
-  const mySize = extractOriginalSize(el);
+  // 이 요소의 "실효 크기" (자식들이 튀어나가면 확장됨)
+  const mySize = computeEffectiveSize(el);
   
   // 스타일 처리
   const styleStr = el.getAttribute('style') || '';
   if(styleStr){
-    // id/class 제거
     if(el.id) el.removeAttribute('id');
     if(el.className) el.removeAttribute('class');
     
     let styleObj = parseInlineStyle(styleStr);
     const isAbsolute = styleObj['position'] === 'absolute';
+    
+    // 자기 자신의 width/height는 실효 크기(mySize)로 덮어쓰기
+    // (자식들이 튀어나가서 확장된 경우 대비)
+    if(mySize.width && mySize.width !== mySize.original.width){
+      styleObj['width'] = mySize.width + 'px';  // convertFigmaStyles가 %로 바꿔줌
+    }
+    if(mySize.height && mySize.height !== mySize.original.height){
+      styleObj['height'] = mySize.height + 'px';
+    }
+    
     styleObj = convertFigmaStyles(styleObj, opts, parentSize, isAbsolute);
     
     const finalStr = stringifyInlineStyle(styleObj);
@@ -3457,15 +3494,12 @@ function convertFigmaTree(el, parentSize, opts, stats){
     if(el.className) el.removeAttribute('class');
   }
   
-  // 자식들에게 넘길 크기 결정
-  // - 내 원본 크기가 있으면 그걸 사용
-  // - 없으면 부모 크기를 그대로 넘김 (투명 wrapper 케이스)
+  // 자식들에게 넘길 크기 = 실효 크기 (확장된 값)
   const childParentSize = {
     width: mySize.width || (parentSize && parentSize.width),
     height: mySize.height || (parentSize && parentSize.height)
   };
   
-  // 자식들 재귀 처리
   Array.from(el.children).forEach(child => {
     convertFigmaTree(child, childParentSize, opts, stats);
   });
