@@ -269,9 +269,9 @@ body{font-family:'IBM Plex Sans KR',sans-serif;background:#f5f5f5;color:#222;hei
           <label class="opt-label" for="figma-base-width">기준 폭 (px)</label>
           <input type="number" class="opt-num" id="figma-base-width" min="100" max="4000" value="900">
         </div>
-        <label class="opt-check">
-  <input type="checkbox" id="figma-lock-ratio" checked>
-  요소별 aspect-ratio 자동 (비율 완벽 유지 ⭐)
+      <label class="opt-check">
+  <input type="checkbox" id="figma-lock-ratio">
+  요소별 aspect-ratio 자동 (⚠️ 특정 케이스만 도움)
 </label>
         <label class="opt-check">
           <input type="checkbox" id="figma-add-wrapper" checked>
@@ -2420,14 +2420,29 @@ function applyTextColor(){
   closeSubPane();
 }
 // ============================================================
-// 🔠 폰트 크기 (font-size) 적용
+// 🔠 폰트 크기 (font-size) 적용 - 모드 인지: FIGMA면 cqw로!
 // ============================================================
 function applyFontSize(){
-  const size = document.getElementById('text-fontsize').value;
-  applyStyleToSelected({ 'font-size': size + 'px' });
-  showToast('크기 적용: ' + size + 'px');
+  const size = parseFloat(document.getElementById('text-fontsize').value);
+  if(!size || size <= 0){ showToast('올바른 크기 입력'); return; }
+  
+  // FIGMA 모드에서 cqw 옵션이 켜져 있으면 → cqw로 저장 (반응형)
+  const cqwOn = document.getElementById('figma-cqw-fonts');
+  const useCqw = (currentMode === 'figma') && cqwOn && cqwOn.checked;
+  
+  if(useCqw){
+    // 기준 폭 대비 cqw로 변환
+    const baseWidth = parseInt(document.getElementById('figma-base-width').value, 10) || 900;
+    const cqw = Math.round((size / baseWidth * 100) * 100) / 100; // 소수점 2자리
+    applyStyleToSelected({ 'font-size': cqw + 'cqw' });
+    showToast('크기 적용: ' + cqw + 'cqw (원본 기준 ' + size + 'px)');
+  } else {
+    applyStyleToSelected({ 'font-size': size + 'px' });
+    showToast('크기 적용: ' + size + 'px');
+  }
   closeSubPane();
 }
+
 
 // ============================================================
 // 🎨 그라데이션 (background) 적용
