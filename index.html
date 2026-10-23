@@ -3572,14 +3572,15 @@ function convertFigmaStyles(styleObj, opts, parentSize, isAbsolute){
     }
   });
   
-  // border-radius → 부모 폭 대비 %
-  ['border-radius','border-top-left-radius','border-top-right-radius',
-   'border-bottom-left-radius','border-bottom-right-radius'].forEach(k => {
-    const px = parsePxValue(styleObj[k]);
-    if(px !== null){
-      styleObj[k] = roundTo(px / parentW * 100, dec) + '%';
-    }
-  });
+ // border-radius → cqw (baseWidth 기준, % 쓰면 타원 됨)
+['border-radius','border-top-left-radius','border-top-right-radius',
+ 'border-bottom-left-radius','border-bottom-right-radius'].forEach(k => {
+  const px = parsePxValue(styleObj[k]);
+  if(px !== null){
+    styleObj[k] = roundTo(px / bw * 100, dec) + 'cqw';
+  }
+});
+
   // line-height: px → 원본 비율 (font-size 대비)
 if(styleObj['line-height']){
   const lhPx = parsePxValue(styleObj['line-height']);
