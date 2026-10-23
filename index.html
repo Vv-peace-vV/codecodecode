@@ -3801,7 +3801,7 @@ function convertFigma(){
     // 최상위의 자식들만 뽑음
     const innerHTML = rootEl.innerHTML;
     
-    const wrapperOuter = `<div style="width:100%;max-width:${baseWidth}px;margin:0 auto${bg ? ';background:' + bg : ''};height:100%">`;
+    const wrapperOuter = `<div style="width:100%;max-width:${baseWidth}px;margin:0 auto${bg ? ';background:' + bg : ''}">`;
     const wrapperInner = `<div style="width:100%;aspect-ratio:${baseWidth}/${originalSize.height};position:relative;overflow:hidden;container-type:inline-size">`;
     const wrapperClose = `</div></div>`;
     
