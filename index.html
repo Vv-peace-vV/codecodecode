@@ -3537,20 +3537,20 @@ function convertFigmaStyles(styleObj, opts, parentSize, isAbsolute){
     }
   });
   
-  // width → 부모 폭 대비 %
-  {
-    const px = parsePxValue(styleObj['width']);
-    if(px !== null){
-      styleObj['width'] = roundTo(px / parentW * 100, dec) + '%';
-    }
+// ⭐ min-width → 부모 폭 대비 % (2차 변환 호환)
+{
+  const px = parsePxValue(styleObj['min-width']);
+  if(px !== null){
+    styleObj['min-width'] = roundTo(px / parentW * 100, dec) + '%';
   }
-  // height → 부모 세로 대비 %
-  {
-    const px = parsePxValue(styleObj['height']);
-    if(px !== null){
-      styleObj['height'] = roundTo(px / parentH * 100, dec) + '%';
-    }
+}
+// ⭐ min-height → 부모 세로 대비 % (2차 변환 호환)
+{
+  const px = parsePxValue(styleObj['min-height']);
+  if(px !== null){
+    styleObj['min-height'] = roundTo(px / parentH * 100, dec) + '%';
   }
+}
   
   // padding → 부모 폭 대비 % (CSS 표준: padding %는 부모 폭 기준)
   ['padding','padding-top','padding-right','padding-bottom','padding-left',
