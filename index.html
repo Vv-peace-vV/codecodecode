@@ -1486,15 +1486,27 @@ if(styleObj['flex-wrap'] === 'nowrap') delete styleObj['flex-wrap'];
 if(styleObj['background-repeat'] === 'repeat') delete styleObj['background-repeat'];
 if(styleObj['background-attachment'] === 'scroll') delete styleObj['background-attachment'];
   
- 
-  // 5. flex:1 1 0% → flex:1 단축
+  // 4. 검정색(기본값) 제거
+  const c = styleObj['color'];
+  if(c && (c === '#000' || c === '#000000' || c === 'black' || /^rgba?\(\s*0\s*,\s*0\s*,\s*0\s*(,\s*1\s*)?\)$/.test(c.replace(/\s/g,'')))){
+    delete styleObj['color'];
+  }
+  
+  // 5. line-height px → 1.7로 변환 (한글 가독성)
+  const lh = styleObj['line-height'];
+  if(lh && /^\d+(\.\d+)?px$/.test(lh)){
+    styleObj['line-height'] = '1.7';
+  }
+    
+  
+  // 6. flex:1 1 0% → flex:1 단축
   if(styleObj['flex'] === '1 1 0%' || styleObj['flex'] === '1 1 0') styleObj['flex'] = '1';
-    // 5-2. flex 단축형
+    // 6-2. flex 단축형
 if(styleObj['flex'] === '0 0 auto') styleObj['flex'] = 'none';
 if(styleObj['flex'] === '1 1 auto') styleObj['flex'] = 'auto';
 if(styleObj['flex'] === '0 1 auto') delete styleObj['flex']; // 기본값
 
-  // 6. height:NNpx → min-height:NNpx 변환 (텍스트 흘러넘침 방지)
+  // 7. height:NNpx → min-height:NNpx 변환 (텍스트 흘러넘침 방지)
 const h = styleObj['height'];
 if(h && /^\d+(\.\d+)?px$/.test(h)){
   // 너무 작은 값(아이콘 등)은 그대로 두기
@@ -1506,13 +1518,13 @@ if(h && /^\d+(\.\d+)?px$/.test(h)){
     }
   }
 }
-    // 7. 불필요한 background 기본값 제거
+    // 8. 불필요한 background 기본값 제거
   if(styleObj['background-color'] === 'transparent' || styleObj['background-color'] === 'rgba(0, 0, 0, 0)'){
     delete styleObj['background-color'];
   }
   if(styleObj['background-image'] === 'none') delete styleObj['background-image'];
   
-  // 8. border:0 / none 제거
+  // 9. border:0 / none 제거
   ['border','border-top','border-right','border-bottom','border-left'].forEach(key => {
     const v = styleObj[key];
     if(v && (v === '0' || v === '0px' || v === 'none' || v === '0px none' || /^0px\s+none/.test(v))){
@@ -1520,7 +1532,7 @@ if(h && /^\d+(\.\d+)?px$/.test(h)){
     }
   });
   
-  // 9. outline:none 같은 무의미한 값 제거
+  // 10. outline:none 같은 무의미한 값 제거
   if(styleObj['outline'] === 'none' || styleObj['outline'] === '0' || styleObj['outline'] === '0px') delete styleObj['outline'];
   
   // 11. font-style:normal 제거 (기본값)
@@ -3493,14 +3505,13 @@ function convertBorderShorthand(val, baseWidth, decimals){
 
 /**
  * 요소에서 원본 width/height (px) 추출
- * (min-width/min-height도 fallback으로 읽음 - 2차 변환 호환)
  */
 function extractOriginalSize(el){
   const styleStr = el.getAttribute('style') || '';
   const map = parseInlineStyle(styleStr);
   return {
-    width: parsePxValue(map['width']) || parsePxValue(map['min-width']),
-    height: parsePxValue(map['height']) || parsePxValue(map['min-height'])
+    width: parsePxValue(map['width']),
+    height: parsePxValue(map['height'])
   };
 }
 
@@ -3537,20 +3548,20 @@ function convertFigmaStyles(styleObj, opts, parentSize, isAbsolute){
     }
   });
   
-// ⭐ min-width → 부모 폭 대비 % (2차 변환 호환)
-{
-  const px = parsePxValue(styleObj['min-width']);
-  if(px !== null){
-    styleObj['min-width'] = roundTo(px / parentW * 100, dec) + '%';
+  // width → 부모 폭 대비 %
+  {
+    const px = parsePxValue(styleObj['width']);
+    if(px !== null){
+      styleObj['width'] = roundTo(px / parentW * 100, dec) + '%';
+    }
   }
-}
-// ⭐ min-height → 부모 세로 대비 % (2차 변환 호환)
-{
-  const px = parsePxValue(styleObj['min-height']);
-  if(px !== null){
-    styleObj['min-height'] = roundTo(px / parentH * 100, dec) + '%';
+  // height → 부모 세로 대비 %
+  {
+    const px = parsePxValue(styleObj['height']);
+    if(px !== null){
+      styleObj['height'] = roundTo(px / parentH * 100, dec) + '%';
+    }
   }
-}
   
   // padding → 부모 폭 대비 % (CSS 표준: padding %는 부모 폭 기준)
   ['padding','padding-top','padding-right','padding-bottom','padding-left',
@@ -3801,7 +3812,7 @@ function convertFigma(){
     // 최상위의 자식들만 뽑음
     const innerHTML = rootEl.innerHTML;
     
-    const wrapperOuter = `<div style="width:100%;max-width:${baseWidth}px;margin:0 auto${bg ? ';background:' + bg : ''}">`;
+    const wrapperOuter = `<div style="width:100%;max-width:${baseWidth}px;margin:0 auto${bg ? ';background:' + bg : ''};height:100%">`;
     const wrapperInner = `<div style="width:100%;aspect-ratio:${baseWidth}/${originalSize.height};position:relative;overflow:hidden;container-type:inline-size">`;
     const wrapperClose = `</div></div>`;
     
