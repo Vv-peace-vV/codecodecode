@@ -1485,13 +1485,7 @@ if(styleObj['flex-wrap'] === 'nowrap') delete styleObj['flex-wrap'];
 // 3-3. background 기본값
 if(styleObj['background-repeat'] === 'repeat') delete styleObj['background-repeat'];
 if(styleObj['background-attachment'] === 'scroll') delete styleObj['background-attachment'];
-  
-  // 4. 검정색(기본값) 제거
-  const c = styleObj['color'];
-  if(c && (c === '#000' || c === '#000000' || c === 'black' || /^rgba?\(\s*0\s*,\s*0\s*,\s*0\s*(,\s*1\s*)?\)$/.test(c.replace(/\s/g,'')))){
-    delete styleObj['color'];
-  }
-  
+
   // 6. flex:1 1 0% → flex:1 단축
   if(styleObj['flex'] === '1 1 0%' || styleObj['flex'] === '1 1 0') styleObj['flex'] = '1';
     // 6-2. flex 단축형
