@@ -3493,13 +3493,14 @@ function convertBorderShorthand(val, baseWidth, decimals){
 
 /**
  * 요소에서 원본 width/height (px) 추출
+ * (min-width/min-height도 fallback으로 읽음 - 2차 변환 호환)
  */
 function extractOriginalSize(el){
   const styleStr = el.getAttribute('style') || '';
   const map = parseInlineStyle(styleStr);
   return {
-    width: parsePxValue(map['width']),
-    height: parsePxValue(map['height'])
+    width: parsePxValue(map['width']) || parsePxValue(map['min-width']),
+    height: parsePxValue(map['height']) || parsePxValue(map['min-height'])
   };
 }
 
